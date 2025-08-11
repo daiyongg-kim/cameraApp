@@ -1,4 +1,4 @@
-package com.example.cameraapp.ui.theme
+package com.daiyongk.neica.ui.theme
 
 import android.app.Activity
 import android.os.Build

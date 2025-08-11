@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.cameraapp"
+    namespace = "com.daiyongk.neica"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.cameraapp"
+        applicationId = "com.daiyongk.neica"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
