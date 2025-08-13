@@ -225,22 +225,17 @@ fun CameraPreviewScreen() {
             )
         }
 
-        // Film effect selector row
-        LazyRow(
+        // Film effect selector - circular scrolling
+        CircularFilmEffectSelector(
+            effects = filmEffects,
+            selectedEffect = selectedEffect.value,
+            onEffectSelected = { selectedEffect.value = it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 200.dp)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
-        ) {
-            items(filmEffects) { effect ->
-                FilmEffectButton(
-                    effect = effect,
-                    isSelected = effect.shortName == selectedEffect.value.shortName,
-                    onClick = { selectedEffect.value = effect }
-                )
-            }
-        }
+            visibleItemsCount = 5
+        )
 
         // Strength slider
         Column(
