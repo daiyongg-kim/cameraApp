@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.FileOutputStream
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -183,6 +184,13 @@ fun CameraPreviewScreen() {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // Camera preview
         AndroidView({ previewView }, modifier = Modifier.fillMaxSize())
+        
+        // Filter overlay for visual preview
+        CameraFilterOverlay(
+            filmEffect = selectedEffect.value,
+            strength = effectStrength.floatValue,
+            modifier = Modifier.fillMaxSize()
+        )
 
         // Camera switch button (top right)
         IconButton(
@@ -834,13 +842,21 @@ private fun takePhoto(
         ContextCompat.getMainExecutor(context),
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                Log.d("CameraApp", "Photo captured with ${filmEffect.name} at ${strength.toInt()}%: ${photoFile.absolutePath}")
-                Toast.makeText(
-                    context, 
-                    "Photo saved with ${filmEffect.shortName} ${strength.toInt()}%", 
-                    Toast.LENGTH_SHORT
-                ).show()
-                onPhotoSaved(photoFile.absolutePath)
+                // Apply filter to the captured image
+                try {
+                    applyFilterToSavedPhoto(photoFile, filmEffect, strength)
+                    Log.d("CameraApp", "Photo captured and filtered with ${filmEffect.name} at ${strength.toInt()}%: ${photoFile.absolutePath}")
+                    Toast.makeText(
+                        context, 
+                        "Photo saved with ${filmEffect.shortName} ${strength.toInt()}%", 
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    onPhotoSaved(photoFile.absolutePath)
+                } catch (e: Exception) {
+                    Log.e("CameraApp", "Failed to apply filter to photo", e)
+                    Toast.makeText(context, "Photo saved but filter failed to apply", Toast.LENGTH_SHORT).show()
+                    onPhotoSaved(photoFile.absolutePath)
+                }
             }
 
             override fun onError(exc: ImageCaptureException) {
@@ -849,6 +865,34 @@ private fun takePhoto(
             }
         }
     )
+}
+
+/**
+ * Apply filter to saved photo
+ */
+private fun applyFilterToSavedPhoto(photoFile: File, filmEffect: FilmEffect, strength: Float) {
+    try {
+        // Load the original bitmap
+        val originalBitmap = BitmapFactory.decodeFile(photoFile.absolutePath) ?: return
+        
+        // Apply the filter
+        val filteredBitmap = originalBitmap.applyFilmEffect(filmEffect, strength)
+        
+        // Save the filtered bitmap back to the same file
+        FileOutputStream(photoFile).use { out ->
+            filteredBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+        }
+        
+        // Clean up
+        if (originalBitmap != filteredBitmap) {
+            originalBitmap.recycle()
+        }
+        filteredBitmap.recycle()
+        
+    } catch (e: Exception) {
+        Log.e("CameraApp", "Error applying filter to photo: ${e.message}", e)
+        throw e
+    }
 }
 
 // Legacy function for compatibility
