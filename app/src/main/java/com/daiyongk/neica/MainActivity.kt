@@ -60,6 +60,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,6 +79,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.daiyongk.neica.ui.theme.CameraAppTheme
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -125,7 +128,17 @@ fun CameraPreviewScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraSelector = remember { mutableStateOf(CameraSelector.DEFAULT_BACK_CAMERA) }
-    val imageCapture = remember { ImageCapture.Builder().build() }
+    val scope = rememberCoroutineScope()
+    
+    // Initialize settings manager
+    val settingsManager = remember { CameraSettingsManager(context) }
+    
+    // Configure ImageCapture with flash mode from settings
+    val imageCapture = remember(settingsManager.flashMode.value) { 
+        ImageCapture.Builder()
+            .setFlashMode(settingsManager.getCameraXFlashMode())
+            .build() 
+    }
     val previewView = remember { PreviewView(context) }
     
     // Film effect states
@@ -141,6 +154,15 @@ fun CameraPreviewScreen() {
     val latestPhotoPath = remember { mutableStateOf<String?>(null) }
     val showPhotoViewer = remember { mutableStateOf(false) }
     val allPhotos = remember { mutableStateOf<List<File>>(emptyList()) }
+    
+    // Settings dialog state
+    val showSettingsDialog = remember { mutableStateOf<CameraSetting?>(null) }
+    
+    // Timer state
+    val timerCountdown = remember { mutableStateOf(0) }
+    
+    // Device tilt for level indicator (would need sensor integration)
+    val deviceTilt = remember { mutableStateOf(0f) }
     
     // Load all photos on launch
     LaunchedEffect(Unit) {
@@ -191,6 +213,41 @@ fun CameraPreviewScreen() {
             strength = effectStrength.floatValue,
             modifier = Modifier.fillMaxSize()
         )
+        
+        // Grid overlay
+        if (settingsManager.showGrid.value) {
+            GridOverlay(modifier = Modifier.fillMaxSize())
+        }
+        
+        // Level indicator
+        if (settingsManager.showLevel.value) {
+            LevelIndicator(
+                tiltAngle = deviceTilt.value,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(bottom = 100.dp)
+            )
+        }
+        
+        // Histogram overlay (Pro feature)
+        if (settingsManager.showHistogram.value) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 100.dp, end = 16.dp)
+            ) {
+                // Would need to capture preview bitmap for histogram
+                // HistogramOverlay(bitmap = previewBitmap)
+            }
+        }
+        
+        // Timer countdown overlay
+        if (timerCountdown.value > 0) {
+            TimerCountdownOverlay(
+                secondsRemaining = timerCountdown.value,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Camera switch button (top right)
         IconButton(
@@ -305,10 +362,22 @@ fun CameraPreviewScreen() {
                     .clip(CircleShape)
                     .background(Color.White)
                     .clickable { 
-                        takePhoto(imageCapture, context, selectedEffect.value, effectStrength.floatValue) { photoPath ->
-                            latestPhotoPath.value = photoPath
-                            // Refresh photo list
-                            allPhotos.value = loadAllPhotos(context)
+                        scope.launch {
+                            takePhotoWithTimer(
+                                imageCapture = imageCapture,
+                                context = context,
+                                filmEffect = selectedEffect.value,
+                                strength = effectStrength.floatValue,
+                                settingsManager = settingsManager,
+                                onCountdown = { seconds ->
+                                    timerCountdown.value = seconds
+                                },
+                                onPhotoSaved = { photoPath ->
+                                    latestPhotoPath.value = photoPath
+                                    // Refresh photo list
+                                    allPhotos.value = loadAllPhotos(context)
+                                }
+                            )
                         }
                     }
             )
@@ -340,7 +409,20 @@ fun CameraPreviewScreen() {
                     currentMode.value = mode
                     showModeSelector.value = false
                 },
-                onDismiss = { showModeSelector.value = false }
+                onDismiss = { showModeSelector.value = false },
+                onSettingClick = { setting ->
+                    showSettingsDialog.value = setting
+                    showModeSelector.value = false
+                }
+            )
+        }
+        
+        // Settings Dialog
+        showSettingsDialog.value?.let { setting ->
+            CameraSettingsDialog(
+                setting = setting,
+                settingsManager = settingsManager,
+                onDismiss = { showSettingsDialog.value = null }
             )
         }
         
@@ -538,7 +620,8 @@ fun loadAllPhotos(context: Context): List<File> {
 fun CameraModeSelector(
     currentMode: CameraMode,
     onModeSelected: (CameraMode) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSettingClick: (CameraSetting) -> Unit
 ) {
     // Semi-transparent overlay
     Box(
@@ -593,7 +676,10 @@ fun CameraModeSelector(
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     settings.take(4).forEach { setting ->
-                        CameraSettingButton(setting = setting)
+                        CameraSettingButton(
+                            setting = setting,
+                            onClick = { onSettingClick(setting) }
+                        )
                     }
                 }
                 
@@ -603,7 +689,10 @@ fun CameraModeSelector(
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     settings.drop(4).forEach { setting ->
-                        CameraSettingButton(setting = setting)
+                        CameraSettingButton(
+                            setting = setting,
+                            onClick = { onSettingClick(setting) }
+                        )
                     }
                 }
             }
@@ -673,11 +762,12 @@ fun ModeButton(
 
 @Composable
 fun CameraSettingButton(
-    setting: CameraSetting
+    setting: CameraSetting,
+    onClick: () -> Unit
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { /* Handle setting click */ }
+        modifier = Modifier.clickable { onClick() }
     ) {
         // Setting icon placeholder
         Box(
@@ -817,6 +907,28 @@ fun FilmEffectButton(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
     }
+}
+
+private suspend fun takePhotoWithTimer(
+    imageCapture: ImageCapture, 
+    context: Context, 
+    filmEffect: FilmEffect, 
+    strength: Float,
+    settingsManager: CameraSettingsManager,
+    onCountdown: (Int) -> Unit = {},
+    onPhotoSaved: (String) -> Unit = {}
+) {
+    // Handle timer countdown
+    val timerDuration = settingsManager.timerDuration.value
+    if (timerDuration != TimerDuration.OFF) {
+        for (i in timerDuration.seconds downTo 1) {
+            onCountdown(i)
+            delay(1000)
+        }
+        onCountdown(0)
+    }
+    
+    takePhoto(imageCapture, context, filmEffect, strength, onPhotoSaved)
 }
 
 private fun takePhoto(
