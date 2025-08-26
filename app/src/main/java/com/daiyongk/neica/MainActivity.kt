@@ -134,12 +134,17 @@ fun CameraPreviewScreen() {
     val settingsManager = remember { CameraSettingsManager(context) }
     
     // Configure ImageCapture with flash mode from settings
-    val imageCapture = remember(settingsManager.flashMode.value) { 
+    val imageCapture = remember { 
         ImageCapture.Builder()
             .setFlashMode(settingsManager.getCameraXFlashMode())
             .build() 
     }
     val previewView = remember { PreviewView(context) }
+    
+    // Update flash mode when it changes
+    LaunchedEffect(settingsManager.flashMode.value) {
+        imageCapture.flashMode = settingsManager.getCameraXFlashMode()
+    }
     
     // Film effect states
     val filmEffects = remember { FilmEffects.getAllEffects() }
