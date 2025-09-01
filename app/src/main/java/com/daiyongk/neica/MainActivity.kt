@@ -56,6 +56,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -150,6 +153,8 @@ fun CameraPreviewScreen() {
     val filmEffects = remember { FilmEffects.getAllEffects() }
     val selectedEffect = remember { mutableStateOf(FilmEffects.CHR) }
     val effectStrength = remember { mutableFloatStateOf(100f) }
+    val showEffectName = remember { mutableStateOf(true) }
+    val coroutineScope = rememberCoroutineScope()
     
     // Camera mode states
     val currentMode = remember { mutableStateOf<CameraMode>(CameraMode.Photo) }
@@ -275,31 +280,52 @@ fun CameraPreviewScreen() {
             )
         }
 
-        // Top overlay with effect name
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 40.dp)
-        ) {
-            Text(
-                text = "${selectedEffect.value.name} ${effectStrength.floatValue.toInt()}%",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
+        // Top overlay with effect name (shows for 1.5 seconds after selection with gradient fade)
+        val textAlpha = animateFloatAsState(
+            targetValue = if (showEffectName.value) 1f else 0f,
+            animationSpec = tween(
+                durationMillis = if (showEffectName.value) 200 else 500 // Quick fade in, gradual fade out
+            ),
+            label = "textAlpha"
+        )
+        
+        if (textAlpha.value > 0.01f) {
+            Box(
                 modifier = Modifier
-                    .background(
-                        Color.Black.copy(alpha = 0.6f),
-                        RoundedCornerShape(20.dp)
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+                    .align(Alignment.TopCenter)
+                    .padding(top = 40.dp)
+                    .graphicsLayer {
+                        alpha = textAlpha.value
+                    }
+            ) {
+                Text(
+                    text = "${selectedEffect.value.name} ${effectStrength.floatValue.toInt()}%",
+                    color = Color.White.copy(alpha = textAlpha.value),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .background(
+                            Color.Black.copy(alpha = 0.6f * textAlpha.value),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
         }
 
         // Film effect selector - circular scrolling
         CircularFilmEffectSelector(
             effects = filmEffects,
             selectedEffect = selectedEffect.value,
-            onEffectSelected = { selectedEffect.value = it },
+            onEffectSelected = { 
+                selectedEffect.value = it
+                // Show the effect name and start timer to hide it
+                showEffectName.value = true
+                coroutineScope.launch {
+                    delay(1500) // Wait 3 seconds
+                    showEffectName.value = false
+                }
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 200.dp)
@@ -308,34 +334,34 @@ fun CameraPreviewScreen() {
         )
 
         // Strength slider
-        Column(
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 24.dp, bottom = 140.dp)
+                .padding(start = 24.dp, end = 24.dp, bottom = 140.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = "Strength",
                 color = Color.White,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            Text(
-                text = "${effectStrength.floatValue.toInt()}",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
+                fontSize = 12.sp
             )
             Slider(
                 value = effectStrength.floatValue,
                 onValueChange = { effectStrength.floatValue = it },
                 valueRange = 0f..100f,
-                modifier = Modifier.width(200.dp),
+                modifier = Modifier.weight(1f),
                 colors = SliderDefaults.colors(
                     thumbColor = Color.White,
                     activeTrackColor = Color.White,
                     inactiveTrackColor = Color.White.copy(alpha = 0.3f)
                 )
+            )
+            Text(
+                text = "${effectStrength.floatValue.toInt()}",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
             )
         }
 

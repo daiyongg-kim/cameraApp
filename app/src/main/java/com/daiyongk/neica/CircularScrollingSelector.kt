@@ -26,6 +26,8 @@ import androidx.compose.ui.Alignment
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -112,7 +114,46 @@ fun CircularFilmEffectSelector(
             flingBehavior = snapBehavior,
             horizontalArrangement = Arrangement.spacedBy(20.dp), // Slightly more spacing for smoother movement
             contentPadding = PaddingValues(horizontal = 140.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawWithContent {
+                    // Draw the content first
+                    drawContent()
+                    
+                    // Draw gradient overlays on both sides
+                    val gradientWidth = size.width * 0.15f // 15% of width for gradient
+                    
+                    // Left side gradient (fade from left edge)
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Black,
+                                Color.Black.copy(alpha = 0.8f),
+                                Color.Black.copy(alpha = 0.3f),
+                                Color.Transparent
+                            ),
+                            startX = 0f,
+                            endX = gradientWidth
+                        ),
+                        size = androidx.compose.ui.geometry.Size(gradientWidth, size.height)
+                    )
+                    
+                    // Right side gradient (fade from right edge)
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.3f),
+                                Color.Black.copy(alpha = 0.8f),
+                                Color.Black
+                            ),
+                            startX = size.width - gradientWidth,
+                            endX = size.width
+                        ),
+                        size = androidx.compose.ui.geometry.Size(gradientWidth, size.height),
+                        topLeft = androidx.compose.ui.geometry.Offset(size.width - gradientWidth, 0f)
+                    )
+                }
         ) {
             items(infiniteEffects.size) { index ->
                 val effect = infiniteEffects[index]
