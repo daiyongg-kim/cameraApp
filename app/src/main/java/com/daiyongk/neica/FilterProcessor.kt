@@ -15,21 +15,31 @@ object FilterProcessor {
     
     /**
      * Apply film effect filter to a bitmap
+     * IMPORTANT: This creates a new bitmap. Caller is responsible for recycling both
+     * the input bitmap (if no longer needed) and the returned bitmap when done.
      */
     fun applyFilter(
         bitmap: Bitmap,
         filmEffect: FilmEffect,
         strength: Float // 0-100
     ): Bitmap {
-        val resultBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        // Create mutable copy for drawing
+        val resultBitmap = Bitmap.createBitmap(
+            bitmap.width,
+            bitmap.height,
+            Bitmap.Config.ARGB_8888
+        )
+
         val canvas = Canvas(resultBitmap)
-        val paint = Paint()
-        
-        // Create color matrix based on film effect
-        val colorMatrix = createColorMatrix(filmEffect, strength)
-        paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
-        
+        val paint = Paint().apply {
+            // Create color matrix based on film effect
+            val colorMatrix = createColorMatrix(filmEffect, strength)
+            colorFilter = ColorMatrixColorFilter(colorMatrix)
+        }
+
+        // Draw filtered bitmap
         canvas.drawBitmap(bitmap, 0f, 0f, paint)
+
         return resultBitmap
     }
     

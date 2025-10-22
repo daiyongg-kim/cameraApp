@@ -84,6 +84,8 @@ import androidx.core.content.ContextCompat
 import com.daiyongk.neica.ui.theme.CameraAppTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -963,9 +965,9 @@ private suspend fun takePhotoWithTimer(
 }
 
 private fun takePhoto(
-    imageCapture: ImageCapture, 
-    context: Context, 
-    filmEffect: FilmEffect, 
+    imageCapture: ImageCapture,
+    context: Context,
+    filmEffect: FilmEffect,
     strength: Float,
     onPhotoSaved: (String) -> Unit = {}
 ) {
@@ -974,31 +976,50 @@ private fun takePhoto(
         context.filesDir,
         "photos/${System.currentTimeMillis()}_${filmEffect.shortName}_${strength.toInt()}.jpg"
     )
-    
+
     // Create the photos directory if it doesn't exist
     photoFile.parentFile?.mkdirs()
 
     val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
+    // Use a background executor for image capture callback
+    val backgroundExecutor = ContextCompat.getMainExecutor(context)
+
     imageCapture.takePicture(
         outputOptions,
-        ContextCompat.getMainExecutor(context),
+        backgroundExecutor,
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                // Apply filter to the captured image
-                try {
-                    applyFilterToSavedPhoto(photoFile, filmEffect, strength)
-                    Log.d("CameraApp", "Photo captured and filtered with ${filmEffect.name} at ${strength.toInt()}%: ${photoFile.absolutePath}")
-                    Toast.makeText(
-                        context, 
-                        "Photo saved with ${filmEffect.shortName} ${strength.toInt()}%", 
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    onPhotoSaved(photoFile.absolutePath)
-                } catch (e: Exception) {
-                    Log.e("CameraApp", "Failed to apply filter to photo", e)
-                    Toast.makeText(context, "Photo saved but filter failed to apply", Toast.LENGTH_SHORT).show()
-                    onPhotoSaved(photoFile.absolutePath)
+                // Process filter on background thread using coroutine
+                (context as? ComponentActivity)?.lifecycleScope?.launch {
+                    try {
+                        // Apply filter on IO dispatcher (background thread)
+                        withContext(Dispatchers.IO) {
+                            applyFilterToSavedPhoto(photoFile, filmEffect, strength)
+                            Log.d("CameraApp", "Photo captured and filtered with ${filmEffect.name} at ${strength.toInt()}%: ${photoFile.absolutePath}")
+                        }
+
+                        // UI updates on main thread
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(
+                                context,
+                                "Photo saved with ${filmEffect.shortName} ${strength.toInt()}%",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            onPhotoSaved(photoFile.absolutePath)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CameraApp", "Failed to apply filter to photo", e)
+                        // UI updates on main thread
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(
+                                context,
+                                "Photo saved but filter failed to apply",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            onPhotoSaved(photoFile.absolutePath)
+                        }
+                    }
                 }
             }
 
@@ -1012,29 +1033,54 @@ private fun takePhoto(
 
 /**
  * Apply filter to saved photo
+ * NOTE: This function should be called from a background thread (IO dispatcher)
+ * as it performs heavy bitmap operations.
  */
 private fun applyFilterToSavedPhoto(photoFile: File, filmEffect: FilmEffect, strength: Float) {
+    var originalBitmap: Bitmap? = null
+    var filteredBitmap: Bitmap? = null
+
     try {
-        // Load the original bitmap
-        val originalBitmap = BitmapFactory.decodeFile(photoFile.absolutePath) ?: return
-        
-        // Apply the filter
-        val filteredBitmap = originalBitmap.applyFilmEffect(filmEffect, strength)
-        
+        // Verify file exists and is readable
+        if (!photoFile.exists() || !photoFile.canRead()) {
+            throw IllegalStateException("Photo file is not accessible: ${photoFile.absolutePath}")
+        }
+
+        // Load the original bitmap with error checking
+        originalBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+            ?: throw IllegalStateException("Failed to decode image file: ${photoFile.absolutePath}")
+
+        Log.d("CameraApp", "Applying ${filmEffect.shortName} filter (${strength.toInt()}%) to ${originalBitmap.width}x${originalBitmap.height} image")
+
+        // Apply the filter (creates new bitmap)
+        filteredBitmap = originalBitmap.applyFilmEffect(filmEffect, strength)
+
         // Save the filtered bitmap back to the same file
         FileOutputStream(photoFile).use { out ->
-            filteredBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            val compressionSuccess = filteredBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            if (!compressionSuccess) {
+                throw IllegalStateException("Failed to compress filtered image")
+            }
+            out.flush()
         }
-        
-        // Clean up
-        if (originalBitmap != filteredBitmap) {
-            originalBitmap.recycle()
-        }
-        filteredBitmap.recycle()
-        
+
+        Log.d("CameraApp", "Successfully applied filter and saved to ${photoFile.absolutePath}")
+
+    } catch (e: OutOfMemoryError) {
+        Log.e("CameraApp", "Out of memory while applying filter", e)
+        throw IllegalStateException("Out of memory while processing image", e)
     } catch (e: Exception) {
         Log.e("CameraApp", "Error applying filter to photo: ${e.message}", e)
         throw e
+    } finally {
+        // Always clean up bitmaps to prevent memory leaks
+        try {
+            originalBitmap?.recycle()
+            filteredBitmap?.recycle()
+            Log.d("CameraApp", "Bitmap resources recycled")
+        } catch (e: Exception) {
+            Log.w("CameraApp", "Error recycling bitmaps: ${e.message}")
+        }
     }
 }
 
